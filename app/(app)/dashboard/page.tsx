@@ -3,16 +3,13 @@ import { prisma } from "@/lib/prisma";
 import { startOfMonth, endOfMonth, format } from "date-fns";
 import Link from "next/link";
 
-async function getRepDashboardData(userId: string) {
+async function getRepData(userId: string) {
   const now = new Date();
   const periodStart = startOfMonth(now);
   const periodEnd = endOfMonth(now);
 
   const period = await prisma.commissionPeriod.findFirst({
-    where: {
-      startDate: { lte: periodEnd },
-      endDate: { gte: periodStart },
-    },
+    where: { startDate: { lte: periodEnd }, endDate: { gte: periodStart } },
     orderBy: { startDate: "desc" },
   });
 
@@ -29,33 +26,23 @@ async function getRepDashboardData(userId: string) {
   const quota = assignment?.quotaOverride ?? assignment?.plan.rules[0]?.quotaTarget ?? 0;
 
   const deals = await prisma.deal.findMany({
-    where: {
-      repId: userId,
-      closeDate: { gte: periodStart, lte: periodEnd },
-    },
-    include: {
-      commissions: period ? { where: { periodId: period.id } } : false,
-    },
+    where: { repId: userId, closeDate: { gte: periodStart, lte: periodEnd } },
+    include: { commissions: period ? { where: { periodId: period.id } } : false },
     orderBy: { closeDate: "desc" },
     take: 10,
   });
 
-  const periodRevenue = deals.reduce((sum, d) => sum + d.value, 0);
+  const revenue = deals.reduce((s, d) => s + d.value, 0);
   const earned = deals.reduce(
-    (sum, d) =>
-      sum +
-      (Array.isArray(d.commissions)
-        ? d.commissions.reduce((s, c) => s + c.amount, 0)
-        : 0),
+    (s, d) => s + (Array.isArray(d.commissions) ? d.commissions.reduce((cs, c) => cs + c.amount, 0) : 0),
     0
   );
+  const attainmentPct = quota > 0 ? (revenue / quota) * 100 : 0;
 
-  const attainmentPct = quota > 0 ? (periodRevenue / quota) * 100 : 0;
-
-  return { quota, periodRevenue, earned, attainmentPct, deals, period };
+  return { quota, revenue, earned, attainmentPct, deals, period };
 }
 
-async function getManagerDashboardData(managerId: string) {
+async function getManagerData(managerId: string) {
   const now = new Date();
   const periodStart = startOfMonth(now);
   const periodEnd = endOfMonth(now);
@@ -63,25 +50,14 @@ async function getManagerDashboardData(managerId: string) {
   const reports = await prisma.user.findMany({
     where: { managerId },
     select: {
-      id: true,
-      name: true,
-      email: true,
+      id: true, name: true, email: true,
       planAssignments: {
-        where: {
-          startDate: { lte: now },
-          OR: [{ endDate: null }, { endDate: { gte: now } }],
-        },
+        where: { startDate: { lte: now }, OR: [{ endDate: null }, { endDate: { gte: now } }] },
         include: { plan: { include: { rules: true } } },
-        take: 1,
-        orderBy: { startDate: "desc" },
+        take: 1, orderBy: { startDate: "desc" },
       },
       commissions: {
-        where: {
-          period: {
-            startDate: { lte: periodEnd },
-            endDate: { gte: periodStart },
-          },
-        },
+        where: { period: { startDate: { lte: periodEnd }, endDate: { gte: periodStart } } },
         select: { amount: true },
       },
       deals: {
@@ -91,20 +67,26 @@ async function getManagerDashboardData(managerId: string) {
     },
   });
 
-  const teamData = reports.map((rep) => {
-    const quota =
-      rep.planAssignments[0]?.quotaOverride ??
-      rep.planAssignments[0]?.plan.rules[0]?.quotaTarget ??
-      0;
+  const team = reports.map((rep) => {
+    const quota = rep.planAssignments[0]?.quotaOverride ?? rep.planAssignments[0]?.plan.rules[0]?.quotaTarget ?? 0;
     const revenue = rep.deals.reduce((s, d) => s + d.value, 0);
     const earned = rep.commissions.reduce((s, c) => s + c.amount, 0);
     const attainmentPct = quota > 0 ? (revenue / quota) * 100 : 0;
     return { ...rep, quota, revenue, earned, attainmentPct };
   });
 
-  const totalLiability = teamData.reduce((s, r) => s + r.earned, 0);
+  const totalLiability = team.reduce((s, r) => s + r.earned, 0);
+  return { team, totalLiability };
+}
 
-  return { teamData, totalLiability };
+function fmt(n: number) {
+  return n.toLocaleString(undefined, { maximumFractionDigits: 0 });
+}
+
+function attainColor(pct: number) {
+  if (pct >= 100) return "#10b981";
+  if (pct >= 70) return "#f59e0b";
+  return "#ef4444";
 }
 
 export default async function DashboardPage() {
@@ -112,150 +94,135 @@ export default async function DashboardPage() {
   if (!session) return null;
 
   const isManager = ["ADMIN", "MANAGER"].includes(session.user.role);
+  const monthLabel = format(new Date(), "MMMM yyyy");
 
+  // ── MANAGER VIEW ──
   if (isManager) {
-    const { teamData, totalLiability } = await getManagerDashboardData(
-      session.user.id
-    );
+    const { team, totalLiability } = await getManagerData(session.user.id);
 
     return (
       <div>
-        <h1 className="text-2xl font-bold text-gray-900 mb-6">
-          Team Dashboard — {format(new Date(), "MMMM yyyy")}
-        </h1>
+        <PageHeader title={`Team Dashboard`} sub={monthLabel} />
 
         <div className="grid grid-cols-2 gap-4 mb-6">
-          <div className="bg-white border border-gray-200 rounded-xl p-5">
-            <p className="text-sm text-gray-500">Total Commission Liability</p>
-            <p className="text-3xl font-bold mt-1">
-              ${totalLiability.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-            </p>
-          </div>
-          <div className="bg-white border border-gray-200 rounded-xl p-5">
-            <p className="text-sm text-gray-500">Reps On Track (≥ 70%)</p>
-            <p className="text-3xl font-bold mt-1">
-              {teamData.filter((r) => r.attainmentPct >= 70).length} /{" "}
-              {teamData.length}
-            </p>
-          </div>
+          <StatCard label="Commission liability" value={`$${fmt(totalLiability)}`} />
+          <StatCard
+            label="Reps on track (≥ 70%)"
+            value={`${team.filter((r) => r.attainmentPct >= 70).length} / ${team.length}`}
+          />
         </div>
 
-        <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+        <Card>
           <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b border-gray-200">
-              <tr>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Rep</th>
-                <th className="text-right px-4 py-3 font-medium text-gray-600">Revenue</th>
-                <th className="text-right px-4 py-3 font-medium text-gray-600">Quota</th>
-                <th className="text-right px-4 py-3 font-medium text-gray-600">Attainment</th>
-                <th className="text-right px-4 py-3 font-medium text-gray-600">Earned</th>
+            <thead>
+              <tr style={{ borderBottom: "1px solid var(--bob-border)" }}>
+                {["Rep", "Revenue", "Quota", "Attainment", "Earned"].map((h, i) => (
+                  <th
+                    key={h}
+                    className={`py-3 text-xs font-semibold ${i === 0 ? "text-left px-4" : "text-right px-4"}`}
+                    style={{ color: "var(--bob-gray)" }}
+                  >
+                    {h}
+                  </th>
+                ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-50">
-              {teamData.length === 0 ? (
+            <tbody>
+              {team.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="text-center py-8 text-gray-400">
+                  <td colSpan={5} className="text-center py-10" style={{ color: "var(--bob-gray)" }}>
                     No reports assigned yet.
                   </td>
                 </tr>
               ) : (
-                teamData.map((rep) => {
-                  const color =
-                    rep.attainmentPct >= 100
-                      ? "text-emerald-600"
-                      : rep.attainmentPct >= 70
-                      ? "text-amber-600"
-                      : "text-red-600";
-                  return (
-                    <tr key={rep.id}>
-                      <td className="px-4 py-3">
-                        <p className="font-medium">{rep.name}</p>
-                        <p className="text-xs text-gray-400">{rep.email}</p>
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        ${rep.revenue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        ${rep.quota.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                      </td>
-                      <td className={`px-4 py-3 text-right font-semibold ${color}`}>
-                        {rep.attainmentPct.toFixed(0)}%
-                      </td>
-                      <td className="px-4 py-3 text-right font-medium">
-                        ${rep.earned.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                      </td>
-                    </tr>
-                  );
-                })
+                team.map((rep) => (
+                  <tr key={rep.id} style={{ borderBottom: "1px solid var(--bob-border)" }}>
+                    <td className="px-4 py-3">
+                      <p className="font-medium" style={{ color: "var(--bob-charcoal)" }}>{rep.name}</p>
+                      <p className="text-xs" style={{ color: "var(--bob-gray)" }}>{rep.email}</p>
+                    </td>
+                    <td className="px-4 py-3 text-right" style={{ color: "var(--bob-charcoal)" }}>${fmt(rep.revenue)}</td>
+                    <td className="px-4 py-3 text-right" style={{ color: "var(--bob-gray)" }}>${fmt(rep.quota)}</td>
+                    <td className="px-4 py-3 text-right font-semibold" style={{ color: attainColor(rep.attainmentPct) }}>
+                      {rep.attainmentPct.toFixed(0)}%
+                    </td>
+                    <td className="px-4 py-3 text-right font-semibold" style={{ color: "var(--bob-charcoal)" }}>
+                      ${fmt(rep.earned)}
+                    </td>
+                  </tr>
+                ))
               )}
             </tbody>
           </table>
-        </div>
+        </Card>
       </div>
     );
   }
 
-  // REP dashboard
-  const { quota, periodRevenue, earned, attainmentPct, deals } =
-    await getRepDashboardData(session.user.id);
-
-  const color =
-    attainmentPct >= 100
-      ? "text-emerald-600"
-      : attainmentPct >= 70
-      ? "text-amber-600"
-      : "text-red-600";
+  // ── REP VIEW ──
+  const { quota, revenue, earned, attainmentPct, deals } = await getRepData(session.user.id);
+  const color = attainColor(attainmentPct);
+  const pctClamped = Math.min(attainmentPct, 100);
 
   return (
     <div>
-      <h1 className="text-2xl font-bold text-gray-900 mb-6">
-        My Dashboard — {format(new Date(), "MMMM yyyy")}
-      </h1>
+      <PageHeader title={`My Dashboard`} sub={monthLabel} />
 
       <div className="grid grid-cols-3 gap-4 mb-6">
-        <div className="bg-white border border-gray-200 rounded-xl p-5">
-          <p className="text-sm text-gray-500">Quota Attainment</p>
-          <p className={`text-3xl font-bold mt-1 ${color}`}>
-            {attainmentPct.toFixed(0)}%
-          </p>
-          <p className="text-xs text-gray-400 mt-1">
-            ${periodRevenue.toLocaleString(undefined, { maximumFractionDigits: 0 })} /{" "}
-            ${quota.toLocaleString(undefined, { maximumFractionDigits: 0 })} quota
-          </p>
-        </div>
-        <div className="bg-white border border-gray-200 rounded-xl p-5">
-          <p className="text-sm text-gray-500">Commission Earned</p>
-          <p className="text-3xl font-bold mt-1">
-            ${earned.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-          </p>
-        </div>
-        <div className="bg-white border border-gray-200 rounded-xl p-5">
-          <p className="text-sm text-gray-500">Deals Closed</p>
-          <p className="text-3xl font-bold mt-1">{deals.length}</p>
-        </div>
+        <StatCard
+          label="Quota attainment"
+          value={`${attainmentPct.toFixed(0)}%`}
+          valueColor={color}
+          sub={`$${fmt(revenue)} of $${fmt(quota)}`}
+        />
+        <StatCard label="Commission earned" value={`$${fmt(earned)}`} valueColor="var(--bob-pink)" />
+        <StatCard label="Deals closed" value={String(deals.length)} />
       </div>
 
-      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-        <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-          <h2 className="font-semibold text-gray-900">Recent Deals</h2>
-          <Link href="/deals" className="text-sm text-indigo-600 hover:text-indigo-800">
-            View all
+      {/* Progress bar */}
+      <Card className="mb-4 p-5">
+        <div className="flex justify-between text-sm mb-2">
+          <span className="font-medium" style={{ color: "var(--bob-charcoal)" }}>Quota progress</span>
+          <span className="font-semibold" style={{ color }}>{attainmentPct.toFixed(0)}%</span>
+        </div>
+        <div className="h-3 rounded-full overflow-hidden" style={{ background: "var(--bob-gray-light)" }}>
+          <div
+            className="h-full rounded-full transition-all"
+            style={{ width: `${pctClamped}%`, background: color }}
+          />
+        </div>
+        <div className="flex justify-between text-xs mt-1.5" style={{ color: "var(--bob-gray)" }}>
+          <span>$0</span>
+          <span>${fmt(quota)}</span>
+        </div>
+      </Card>
+
+      <Card>
+        <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: "1px solid var(--bob-border)" }}>
+          <h2 className="font-semibold" style={{ color: "var(--bob-charcoal)" }}>Recent Deals</h2>
+          <Link href="/deals" className="text-sm font-medium" style={{ color: "var(--bob-pink)" }}>
+            View all →
           </Link>
         </div>
         <table className="w-full text-sm">
-          <thead className="bg-gray-50 border-b border-gray-100">
-            <tr>
-              <th className="text-left px-4 py-2 font-medium text-gray-600">Deal</th>
-              <th className="text-right px-4 py-2 font-medium text-gray-600">Value</th>
-              <th className="text-right px-4 py-2 font-medium text-gray-600">Close Date</th>
-              <th className="text-right px-4 py-2 font-medium text-gray-600">Commission</th>
+          <thead>
+            <tr style={{ borderBottom: "1px solid var(--bob-border)" }}>
+              {["Deal", "Value", "Close Date", "Commission"].map((h, i) => (
+                <th
+                  key={h}
+                  className={`py-2 text-xs font-semibold ${i === 0 ? "text-left px-4" : "text-right px-4"}`}
+                  style={{ color: "var(--bob-gray)" }}
+                >
+                  {h}
+                </th>
+              ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-50">
+          <tbody>
             {deals.length === 0 ? (
               <tr>
-                <td colSpan={4} className="text-center py-8 text-gray-400">
-                  No deals closed this month yet.
+                <td colSpan={4} className="text-center py-8" style={{ color: "var(--bob-gray)" }}>
+                  No deals yet this month. Upload data in the Data section.
                 </td>
               </tr>
             ) : (
@@ -264,18 +231,12 @@ export default async function DashboardPage() {
                   ? deal.commissions.reduce((s, c) => s + c.amount, 0)
                   : 0;
                 return (
-                  <tr key={deal.id}>
-                    <td className="px-4 py-3 font-medium">{deal.title}</td>
-                    <td className="px-4 py-3 text-right">
-                      ${deal.value.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                    </td>
-                    <td className="px-4 py-3 text-right text-gray-500">
-                      {format(deal.closeDate, "MMM d")}
-                    </td>
-                    <td className="px-4 py-3 text-right font-medium text-emerald-600">
-                      {commission > 0
-                        ? `$${commission.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
-                        : "—"}
+                  <tr key={deal.id} style={{ borderBottom: "1px solid var(--bob-border)" }}>
+                    <td className="px-4 py-3 font-medium" style={{ color: "var(--bob-charcoal)" }}>{deal.title}</td>
+                    <td className="px-4 py-3 text-right" style={{ color: "var(--bob-charcoal)" }}>${fmt(deal.value)}</td>
+                    <td className="px-4 py-3 text-right" style={{ color: "var(--bob-gray)" }}>{format(deal.closeDate, "MMM d")}</td>
+                    <td className="px-4 py-3 text-right font-semibold" style={{ color: "var(--bob-pink)" }}>
+                      {commission > 0 ? `$${fmt(commission)}` : "—"}
                     </td>
                   </tr>
                 );
@@ -283,7 +244,51 @@ export default async function DashboardPage() {
             )}
           </tbody>
         </table>
-      </div>
+      </Card>
+    </div>
+  );
+}
+
+function PageHeader({ title, sub }: { title: string; sub: string }) {
+  return (
+    <div className="mb-6">
+      <h1 className="text-2xl font-bold" style={{ color: "var(--bob-charcoal)", fontFamily: "var(--font-serif)" }}>
+        {title}
+      </h1>
+      <p className="text-sm mt-0.5" style={{ color: "var(--bob-gray)" }}>{sub}</p>
+    </div>
+  );
+}
+
+function StatCard({
+  label,
+  value,
+  valueColor,
+  sub,
+}: {
+  label: string;
+  value: string;
+  valueColor?: string;
+  sub?: string;
+}) {
+  return (
+    <div className="rounded-xl p-5" style={{ background: "#fff", border: "1px solid var(--bob-border)" }}>
+      <p className="text-sm" style={{ color: "var(--bob-gray)" }}>{label}</p>
+      <p className="text-3xl font-bold mt-1" style={{ color: valueColor ?? "var(--bob-charcoal)" }}>
+        {value}
+      </p>
+      {sub && <p className="text-xs mt-0.5" style={{ color: "var(--bob-gray)" }}>{sub}</p>}
+    </div>
+  );
+}
+
+function Card({ children, className = "" }: { children: React.ReactNode; className?: string }) {
+  return (
+    <div
+      className={`rounded-xl overflow-hidden ${className}`}
+      style={{ background: "#fff", border: "1px solid var(--bob-border)" }}
+    >
+      {children}
     </div>
   );
 }

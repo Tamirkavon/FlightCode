@@ -11,9 +11,9 @@ export default async function AppLayout({
   if (!session) redirect("/login");
 
   return (
-    <div className="flex min-h-screen bg-gray-50">
-      <Sidebar role={session.user.role} />
-      <main className="flex-1 p-8 overflow-auto">{children}</main>
+    <div className="flex min-h-screen" style={{ background: "var(--bob-cream)" }}>
+      <Sidebar role={session.user.role} name={session.user.name} />
+      <main className="flex-1 p-8 overflow-auto min-w-0">{children}</main>
     </div>
   );
 }

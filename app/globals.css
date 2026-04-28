@@ -1,26 +1,77 @@
+@import url("https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Playfair+Display:wght@400;600;700&display=swap");
 @import "tailwindcss";
 
+/* ── hibob Brand Tokens ─────────────────────────────────────── */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Primary pink */
+  --bob-pink:        #E31C79;
+  --bob-pink-hover:  #C41569;
+  --bob-pink-light:  #FCE4F1;
+  --bob-pink-muted:  #F5C0DC;
+
+  /* Burgundy accent */
+  --bob-burgundy:    #8B1A4A;
+
+  /* Neutrals */
+  --bob-cream:       #F7F3EE;
+  --bob-charcoal:    #3D3535;
+  --bob-dark:        #1E1414;
+  --bob-gray:        #6B6060;
+  --bob-gray-light:  #EAE5E0;
+  --bob-border:      #E2DAD4;
+
+  /* Semantic */
+  --background: var(--bob-cream);
+  --foreground: var(--bob-charcoal);
+  --font-sans: "DM Sans", system-ui, sans-serif;
+  --font-serif: "Playfair Display", Georgia, serif;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --color-bob-pink: var(--bob-pink);
+  --color-bob-pink-hover: var(--bob-pink-hover);
+  --color-bob-pink-light: var(--bob-pink-light);
+  --color-bob-burgundy: var(--bob-burgundy);
+  --color-bob-cream: var(--bob-cream);
+  --color-bob-charcoal: var(--bob-charcoal);
+  --color-bob-dark: var(--bob-dark);
+  --color-bob-gray: var(--bob-gray);
+  --color-bob-gray-light: var(--bob-gray-light);
+  --color-bob-border: var(--bob-border);
+  --font-sans: var(--font-sans);
+  --font-serif: var(--font-serif);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--bob-cream);
+  color: var(--bob-charcoal);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── hibob Logo Component ────────────────────────────────────── */
+.bob-logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-family: var(--font-sans);
+  font-weight: 700;
+  line-height: 1;
+}
+
+.bob-logo .hi-bubble {
+  background: var(--bob-pink);
+  color: #fff;
+  border-radius: 8px 8px 8px 2px;
+  padding: 4px 7px;
+  font-size: 0.85em;
+  letter-spacing: -0.01em;
+}
+
+.bob-logo .bob-text {
+  color: var(--bob-charcoal);
+  font-size: 1em;
+  letter-spacing: -0.02em;
 }

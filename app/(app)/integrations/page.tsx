@@ -1,82 +1,82 @@
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { redirect } from "next/navigation";
-import { format } from "date-fns";
-import { SyncButton } from "./SyncButton";
+import { MockDataUploader } from "./MockDataUploader";
+import { MockDataGenerator } from "./MockDataGenerator";
 
-export default async function IntegrationsPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ connected?: string; error?: string }>;
-}) {
+export default async function IntegrationsPage() {
   const session = await auth();
   if (!session || session.user.role !== "ADMIN") redirect("/dashboard");
 
-  const sp = await searchParams;
-  const integration = await prisma.cRMIntegration.findFirst({
-    where: { type: "SALESFORCE" },
-  });
+  const dealCount = await prisma.deal.count();
+  const repCount = await prisma.user.count({ where: { role: "REP" } });
 
   return (
     <div className="max-w-2xl">
-      <h1 className="text-2xl font-bold text-gray-900 mb-6">Integrations</h1>
+      <h1
+        className="text-2xl font-bold mb-1"
+        style={{ color: "var(--bob-charcoal)", fontFamily: "var(--font-serif)" }}
+      >
+        Data
+      </h1>
+      <p className="text-sm mb-6" style={{ color: "var(--bob-gray)" }}>
+        Upload your deal data or generate realistic mock data for demo purposes.
+      </p>
 
-      {sp.connected === "1" && (
-        <div className="mb-4 bg-emerald-50 border border-emerald-200 text-emerald-800 px-4 py-3 rounded-xl text-sm">
-          Salesforce connected successfully!
-        </div>
-      )}
-      {sp.error && (
-        <div className="mb-4 bg-red-50 border border-red-200 text-red-800 px-4 py-3 rounded-xl text-sm">
-          Error: {sp.error}
-        </div>
-      )}
-
-      <div className="bg-white border border-gray-200 rounded-xl p-6">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center text-blue-700 font-bold text-sm">
-              SF
-            </div>
-            <div>
-              <h2 className="font-semibold text-gray-900">Salesforce</h2>
-              <p className="text-sm text-gray-500">Sync Closed Won opportunities as deals</p>
-            </div>
-          </div>
-          {integration?.isActive ? (
-            <span className="text-xs bg-emerald-50 text-emerald-700 px-3 py-1 rounded-full font-medium">
-              Connected
-            </span>
-          ) : (
-            <a
-              href="/api/integrations/salesforce/connect"
-              className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors"
-            >
-              Connect
-            </a>
-          )}
-        </div>
-
-        {integration && (
-          <div className="mt-4 pt-4 border-t border-gray-100 space-y-3">
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-500">Instance URL</span>
-              <span className="font-mono text-xs">{integration.instanceUrl}</span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-500">Last synced</span>
-              <span>
-                {integration.lastSyncedAt
-                  ? format(integration.lastSyncedAt, "MMM d, yyyy h:mm a")
-                  : "Never"}
-              </span>
-            </div>
-            <div className="pt-2">
-              <SyncButton />
-            </div>
-          </div>
-        )}
+      {/* Stats */}
+      <div className="grid grid-cols-2 gap-4 mb-6">
+        <StatCard label="Deals loaded" value={dealCount} />
+        <StatCard label="Sales reps" value={repCount} />
       </div>
+
+      {/* Mock generator */}
+      <Section title="Generate mock data" description="Instantly create realistic deals, reps, and commission records for demo or testing.">
+        <MockDataGenerator />
+      </Section>
+
+      {/* CSV upload */}
+      <Section title="Upload deals (CSV)" description="Upload a CSV file with your deal data. Required columns: name, value, close_date, rep_email, stage.">
+        <MockDataUploader />
+      </Section>
+    </div>
+  );
+}
+
+function StatCard({ label, value }: { label: string; value: number }) {
+  return (
+    <div
+      className="rounded-xl p-5"
+      style={{ background: "#fff", border: "1px solid var(--bob-border)" }}
+    >
+      <p className="text-sm" style={{ color: "var(--bob-gray)" }}>{label}</p>
+      <p className="text-3xl font-bold mt-1" style={{ color: "var(--bob-charcoal)" }}>
+        {value}
+      </p>
+    </div>
+  );
+}
+
+function Section({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      className="rounded-xl p-6 mb-4"
+      style={{ background: "#fff", border: "1px solid var(--bob-border)" }}
+    >
+      <h2 className="font-semibold mb-0.5" style={{ color: "var(--bob-charcoal)" }}>
+        {title}
+      </h2>
+      <p className="text-sm mb-4" style={{ color: "var(--bob-gray)" }}>
+        {description}
+      </p>
+      {children}
     </div>
   );
 }
