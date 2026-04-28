@@ -1,0 +1,262 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../app/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Enums ────────────────────────────────────────────────────────────────────
+
+enum Role {
+  ADMIN
+  MANAGER
+  REP
+  FINANCE
+}
+
+enum PlanType {
+  INDIVIDUAL
+  TEAM
+}
+
+enum MetricType {
+  REVENUE
+  DEALS_CLOSED
+  CUSTOM
+}
+
+enum PeriodType {
+  MONTHLY
+  QUARTERLY
+}
+
+enum PeriodStatus {
+  OPEN
+  PENDING_APPROVAL
+  APPROVED
+  PAID
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum DisputeStatus {
+  OPEN
+  UNDER_REVIEW
+  RESOLVED
+  DISMISSED
+}
+
+enum CommissionStatus {
+  PENDING
+  APPROVED
+  DISPUTED
+  PAID
+}
+
+// ─── Core Models ──────────────────────────────────────────────────────────────
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String
+  password  String?
+  role      Role     @default(REP)
+  managerId String?
+  manager   User?    @relation("ManagerReps", fields: [managerId], references: [id])
+  reports   User[]   @relation("ManagerReps")
+  createdAt DateTime @default(now())
+
+  planAssignments  PlanAssignment[]
+  deals            Deal[]
+  commissions      CommissionRecord[]
+  repApprovals     ApprovalRecord[]   @relation("RepApprovals")
+  managerApprovals ApprovalRecord[]   @relation("ManagerApprovals")
+  disputes         Dispute[]
+
+  // NextAuth
+  accounts Account[]
+  sessions Session[]
+}
+
+model CommissionPlan {
+  id            String     @id @default(cuid())
+  name          String
+  description   String?
+  type          PlanType   @default(INDIVIDUAL)
+  currency      String     @default("USD")
+  periodType    PeriodType @default(MONTHLY)
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+  isActive      Boolean    @default(true)
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  rules       PlanRule[]
+  assignments PlanAssignment[]
+}
+
+model PlanRule {
+  id          String         @id @default(cuid())
+  planId      String
+  plan        CommissionPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  metric      MetricType     @default(REVENUE)
+  quotaTarget Float
+  baseRate    Float
+  rampMonths  Int            @default(0)
+  // JSON array: [{fromPct: 0, toPct: 100, rate: 0.05}, {fromPct: 100, toPct: null, rate: 0.08}]
+  tiers       Json           @default("[]")
+  createdAt   DateTime       @default(now())
+}
+
+model PlanAssignment {
+  id            String         @id @default(cuid())
+  userId        String
+  user          User           @relation(fields: [userId], references: [id])
+  planId        String
+  plan          CommissionPlan @relation(fields: [planId], references: [id])
+  quotaOverride Float?
+  startDate     DateTime
+  endDate       DateTime?
+  createdAt     DateTime       @default(now())
+
+  @@unique([userId, planId, startDate])
+}
+
+model Deal {
+  id       String   @id @default(cuid())
+  crmId    String   @unique
+  title    String
+  value    Float
+  currency String   @default("USD")
+  closeDate DateTime
+  stage    String
+  repId    String
+  rep      User     @relation(fields: [repId], references: [id])
+  rawData  Json?
+  syncedAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  commissions CommissionRecord[]
+}
+
+model CommissionPeriod {
+  id        String       @id @default(cuid())
+  name      String
+  type      PeriodType   @default(MONTHLY)
+  startDate DateTime
+  endDate   DateTime
+  status    PeriodStatus @default(OPEN)
+  createdAt DateTime     @default(now())
+
+  commissions CommissionRecord[]
+  approvals   ApprovalRecord[]
+}
+
+model CommissionRecord {
+  id             String           @id @default(cuid())
+  dealId         String
+  deal           Deal             @relation(fields: [dealId], references: [id])
+  userId         String
+  user           User             @relation(fields: [userId], references: [id])
+  periodId       String
+  period         CommissionPeriod @relation(fields: [periodId], references: [id])
+  planId         String
+  amount         Float
+  currency       String           @default("USD")
+  rate           Float
+  attainmentPct  Float
+  status         CommissionStatus @default(PENDING)
+  calculatedAt   DateTime         @default(now())
+
+  dispute Dispute?
+
+  @@unique([dealId, userId, periodId])
+}
+
+model ApprovalRecord {
+  id              String           @id @default(cuid())
+  periodId        String
+  period          CommissionPeriod @relation(fields: [periodId], references: [id])
+  repId           String
+  rep             User             @relation("RepApprovals", fields: [repId], references: [id])
+  managerId       String?
+  manager         User?            @relation("ManagerApprovals", fields: [managerId], references: [id])
+  status          ApprovalStatus   @default(PENDING)
+  repSignedAt     DateTime?
+  managerSignedAt DateTime?
+  notes           String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@unique([periodId, repId])
+}
+
+model Dispute {
+  id                 String           @id @default(cuid())
+  commissionRecordId String           @unique
+  commissionRecord   CommissionRecord @relation(fields: [commissionRecordId], references: [id])
+  repId              String
+  rep                User             @relation(fields: [repId], references: [id])
+  reason             String
+  evidence           String?
+  status             DisputeStatus    @default(OPEN)
+  resolution         String?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+}
+
+model CRMIntegration {
+  id             String    @id @default(cuid())
+  type           String    @default("SALESFORCE")
+  instanceUrl    String
+  accessToken    String
+  refreshToken   String
+  tokenExpiresAt DateTime?
+  fieldMappings  Json      @default("{}")
+  lastSyncedAt   DateTime?
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+}
+
+// ─── NextAuth Models ──────────────────────────────────────────────────────────
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
